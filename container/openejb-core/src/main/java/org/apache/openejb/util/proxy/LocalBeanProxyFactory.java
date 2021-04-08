@@ -191,8 +191,8 @@ public class LocalBeanProxyFactory implements Opcodes {
                 if (Modifier.isPublic(method.getModifiers())
                     || method.getParameterTypes().length == 0 && ("finalize".equals(name)
                     || "clone".equals(name))) {
-                    // forward invocations of any public methods or 
-                    // finalize/clone methods to businessHandler 
+                    // forward invocations of any public methods or
+                    // finalize/clone methods to businessHandler
                     processMethod(cw, method, proxyClassFileName, BUSSINESS_HANDLER_NAME);
                 } else {
                     // forward invocations of any other methods to nonBusinessHandler
@@ -703,101 +703,11 @@ public class LocalBeanProxyFactory implements Opcodes {
      */
     public static class Unsafe {
 
-        // sun.misc.Unsafe
-        private static final Object unsafe;
-        private static final Method unsafeDefineClass;
-        private static final Method allocateInstance;
-        private static final Method putObject;
-        private static final Method objectFieldOffset;
-
-        static {
-            final Class<?> unsafeClass;
-            try {
-                unsafeClass = AccessController.doPrivileged(new PrivilegedAction<Class<?>>() {
-                    @Override
-                    public Class<?> run() {
-                        try {
-                            return Thread.currentThread().getContextClassLoader().loadClass("sun.misc.Unsafe");
-                        } catch (final Exception e) {
-                            try {
-                                return ClassLoader.getSystemClassLoader().loadClass("sun.misc.Unsafe");
-                            } catch (final ClassNotFoundException e1) {
-                                throw new IllegalStateException("Cannot get sun.misc.Unsafe", e);
-                            }
-                        }
-                    }
-                });
-            } catch (final Exception e) {
-                throw new IllegalStateException("Cannot get sun.misc.Unsafe class", e);
-            }
-
-            unsafe = AccessController.doPrivileged(new PrivilegedAction<Object>() {
-                @Override
-                public Object run() {
-                    try {
-                        final Field field = unsafeClass.getDeclaredField("theUnsafe");
-                        field.setAccessible(true);
-                        return field.get(null);
-                    } catch (final Exception e) {
-                        throw new IllegalStateException("Cannot get sun.misc.Unsafe", e);
-                    }
-                }
-            });
-            allocateInstance = AccessController.doPrivileged(new PrivilegedAction<Method>() {
-                @Override
-                public Method run() {
-                    try {
-                        final Method mtd = unsafeClass.getDeclaredMethod("allocateInstance", Class.class);
-                        mtd.setAccessible(true);
-                        return mtd;
-                    } catch (final Exception e) {
-                        throw new IllegalStateException("Cannot get sun.misc.Unsafe.allocateInstance", e);
-                    }
-                }
-            });
-            objectFieldOffset = AccessController.doPrivileged(new PrivilegedAction<Method>() {
-                @Override
-                public Method run() {
-                    try {
-                        final Method mtd = unsafeClass.getDeclaredMethod("objectFieldOffset", Field.class);
-                        mtd.setAccessible(true);
-                        return mtd;
-                    } catch (final Exception e) {
-                        throw new IllegalStateException("Cannot get sun.misc.Unsafe.objectFieldOffset", e);
-                    }
-                }
-            });
-            putObject = AccessController.doPrivileged(new PrivilegedAction<Method>() {
-                @Override
-                public Method run() {
-                    try {
-                        final Method mtd = unsafeClass.getDeclaredMethod("putObject", Object.class, long.class, Object.class);
-                        mtd.setAccessible(true);
-                        return mtd;
-                    } catch (final Exception e) {
-                        throw new IllegalStateException("Cannot get sun.misc.Unsafe.putObject", e);
-                    }
-                }
-            });
-            unsafeDefineClass = AccessController.doPrivileged(new PrivilegedAction<Method>() {
-                @Override
-                public Method run() {
-                    try {
-                        final Method mtd = unsafeClass.getDeclaredMethod("defineClass", String.class, byte[].class, int.class, int.class, ClassLoader.class, ProtectionDomain.class);
-                        mtd.setAccessible(true);
-                        return mtd;
-                    } catch (final Exception e) {
-                        LOGGER.debug("Unsafe's defineClass not available, will use classloader's defineClass");
-                        return null;
-                    }
-                }
-            });
-        }
-
         public static Object allocateInstance(final Class clazz) {
             try {
-                return allocateInstance.invoke(unsafe, clazz);
-            } catch (final IllegalAccessException e) {
+                // not the same, but returns the right thing?
+                return clazz.getDeclaredConstructor().newInstance();
+            } catch (IllegalAccessException | java.lang.NoSuchMethodException | java.lang.InstantiationException e) {
                 throw new IllegalStateException("Failed to allocateInstance of Proxy class " + clazz.getName(), e);
             } catch (final InvocationTargetException e) {
                 final Throwable throwable = e.getTargetException() != null ? e.getTargetException() : e;
@@ -806,27 +716,17 @@ public class LocalBeanProxyFactory implements Opcodes {
         }
 
         private static void setValue(final Field field, final Object object, final Object value) {
-            final long offset;
             try {
-                offset = (Long) objectFieldOffset.invoke(unsafe, field);
-            } catch (final Exception e) {
+                field.setAccessible(true);
+                field.set(object, value);
+            } catch (Exception e) {
                 throw new IllegalStateException("Failed getting offset for: field=" + field.getName() + "  class=" + field.getDeclaringClass().getName(), e);
-            }
-
-            try {
-                putObject.invoke(unsafe, object, offset, value);
-            } catch (final Exception e) {
-                throw new IllegalStateException("Failed putting field=" + field.getName() + "  class=" + field.getDeclaringClass().getName(), e);
             }
         }
 
         // it is super important to pass a classloader as first parameter otherwise if API class is in a "permanent" classloader then it will leak
         public static Class defineClass(final ClassLoader loader, final Class<?> clsToProxy, final String proxyName, final byte[] proxyBytes) throws IllegalAccessException, InvocationTargetException {
-            if (unsafeDefineClass != null) {
-                return (Class<?>) unsafeDefineClass.invoke(unsafe, proxyName, proxyBytes, 0, proxyBytes.length, loader, clsToProxy.getProtectionDomain());
-            } else {
-                return (Class) getClassLoaderDefineClassMethod(loader).invoke(loader, proxyName, proxyBytes, 0, proxyBytes.length, clsToProxy.getProtectionDomain());
-            }
+            return (Class) getClassLoaderDefineClassMethod(loader).invoke(loader, proxyName, proxyBytes, 0, proxyBytes.length, clsToProxy.getProtectionDomain());
         }
 
         private static Method getClassLoaderDefineClassMethod(ClassLoader classLoader) {
